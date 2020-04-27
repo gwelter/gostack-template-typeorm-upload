@@ -1,12 +1,18 @@
+import multer from 'multer';
+import csvParse from 'csv-parse';
+import fs from 'fs';
+import path from 'path';
 import { Router } from 'express';
 import { getCustomRepository } from 'typeorm';
+import uploadConfig from '../config/upload';
 
 import TransactionsRepository from '../repositories/TransactionsRepository';
 import CreateTransactionService from '../services/CreateTransactionService';
 import DeleteTransactionService from '../services/DeleteTransactionService';
-// import ImportTransactionsService from '../services/ImportTransactionsService';
+import ImportTransactionsService from '../services/ImportTransactionsService';
 
 const transactionsRouter = Router();
+const upload = multer(uploadConfig);
 
 transactionsRouter.get('/', async (request, response) => {
   const transactionsRepository = getCustomRepository(TransactionsRepository);
@@ -33,8 +39,36 @@ transactionsRouter.delete('/:id', async (request, response) => {
   return response.status(204).send();
 });
 
-transactionsRouter.post('/import', async (request, response) => {
-  // TODO
-});
+transactionsRouter.post(
+  '/import',
+  upload.single('file'),
+  async (request, response) => {
+    const { filename } = request.file;
+    const csvFilePath = path.resolve(__dirname, '..', '..', 'tmp', filename);
+
+    const readCSVStream = fs.createReadStream(csvFilePath);
+
+    const parseStream = csvParse({
+      from_line: 2,
+      ltrim: true,
+      rtrim: true,
+    });
+
+    const parseCSV = readCSVStream.pipe(parseStream);
+
+    const lines: string[] = [];
+
+    parseCSV.on('data', line => {
+      lines.push(line);
+    });
+
+    await new Promise(resolve => {
+      parseCSV.on('end', resolve);
+    });
+    await fs.promises.unlink(csvFilePath);
+
+    return response.json({ lines });
+  },
+);
 
 export default transactionsRouter;
